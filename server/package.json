@@ -1,0 +1,25 @@
+{
+  "name": "telegram-content-bot",
+  "version": "1.0.0",
+  "description": "A Telegram bot that fetches content from the Unsplash API and provides a user-friendly interface.",
+  "main": "src/app.ts",
+  "scripts": {
+    "start": "ts-node src/app.ts",
+    "dev": "nodemon src/app.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "axios": "^0.21.1",
+    "dotenv": "^8.2.0",
+    "telegraf": "^3.38.0"
+  },
+  "devDependencies": {
+    "typescript": "^4.1.2",
+    "ts-node": "^9.1.1",
+    "nodemon": "^2.0.7"
+  },
+  "engines": {
+    "node": ">=12.0.0"
+  }
+}
