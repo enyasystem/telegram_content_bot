@@ -1,27 +1,51 @@
 import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
 
-export const authenticateUser = (req: Request, res: Response, next: NextFunction) => {
-    // Middleware logic to authenticate user
-    const token = req.headers['authorization'];
+interface UserPayload {
+    id: number;
+    username?: string;  // Make username optional to match usage
+    groups: string[];
+}
+
+declare global {
+    namespace Express {
+        interface Request {
+            user?: UserPayload;  // Use the UserPayload interface here
+        }
+    }
+}
+
+export const authenticateUser = (
+    req: Request, 
+    res: Response, 
+    next: NextFunction
+): Response | void => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
     if (!token) {
-        return res.status(401).json({ message: 'Unauthorized' });
+        return res.status(401).json({ message: 'No token provided' });
     }
 
-    // Verify token logic here (e.g., using JWT)
-    // If valid, attach user info to request object
-    // req.user = decodedUser;
-
-    next();
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as UserPayload;  // Use UserPayload here
+        req.user = decoded;
+        return next();
+    } catch (error) {
+        return res.status(401).json({ message: 'Invalid token' });
+    }
 };
 
-export const checkGroupMembership = (req: Request, res: Response, next: NextFunction) => {
-    // Middleware logic to check user group membership
-    const user = req.user; // Assuming user info is attached by previous middleware
+export const checkGroupMembership = (
+    req: Request, 
+    res: Response, 
+    next: NextFunction
+): Response | void => {
+    const user = req.user;
 
     if (!user || !user.groups.includes('desiredGroup')) {
         return res.status(403).json({ message: 'Forbidden: Insufficient permissions' });
     }
 
-    next();
+    return next();
 };

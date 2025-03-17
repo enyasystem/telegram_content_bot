@@ -1,20 +1,41 @@
-Sure, here's the contents for the file `/telegram-content-bot/telegram-content-bot/server/src/app.ts`:
-
 import express from 'express';
-import bodyParser from 'body-parser';
-import { botRouter } from './controllers/botController';
-import { unsplashRouter } from './controllers/unsplashController';
-import { authMiddleware } from './middleware/auth';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import config from './config/env';
+import { startBot } from './services/telegram';
+import { authenticateUser } from './middleware/auth';
+import * as unsplashController from './controllers/unsplashController';
+
+dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-app.use(bodyParser.json());
-app.use(authMiddleware);
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-app.use('/api/bot', botRouter);
-app.use('/api/unsplash', unsplashRouter);
+// Protected routes
+const apiRouter = express.Router();
+apiRouter.use(authenticateUser);
+apiRouter.get('/images/search', unsplashController.searchImages);
+apiRouter.get('/images/random', unsplashController.getRandomImage);
 
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+// Mount the router
+app.use('/api', apiRouter);
+
+// Start the server and bot
+const startServer = async () => {
+    try {
+        await startBot();
+        app.listen(config.PORT, () => {
+            console.log(`Server running on port ${config.PORT}`);
+        });
+    } catch (error) {
+        console.error('Failed to start server:', error);
+        process.exit(1);
+    }
+};
+
+startServer();
+
+export default app;

@@ -8,12 +8,14 @@ export interface User {
 
 export interface UnsplashImage {
     id: string;
-    description: string | null;
     urls: {
-        small: string;
         regular: string;
-        full: string;
+        small: string;
     };
+    user: {
+        name: string;
+    };
+    description: string;
 }
 
 export interface TelegramMessage {
@@ -26,4 +28,9 @@ export interface TelegramMessage {
         id: string;
         username: string;
     };
+}
+
+export interface TelegramUser {
+    id: number;
+    username?: string;
 }
