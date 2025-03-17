@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import path from 'path';
 import { Message } from 'telegraf/types';
 import { checkGroupMembership } from '../middleware/authMiddleware';
+import { searchPhotos, getRandomPhoto } from './unsplash';
 
 // Configure dotenv to look for .env in the project root
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -64,32 +65,95 @@ bot.command('help', async (ctx: Context) => {
 });
 
 // Add search command handler
-bot.command('search', async (ctx: Context) => {
-    const message = ctx.message as Message.TextMessage;
-    const query = message.text.split(' ').slice(1).join(' ');
-    
-    if (!query) {
-        return ctx.reply('Please provide a search query. Example: /search nature');
-    }
-    
+bot.command('search', checkGroupMembership, async (ctx: Context) => {
     try {
-        await ctx.reply(`🔍 Searching for: ${query}`);
-        // Search implementation will be added later
-        return;
+        const message = ctx.message as Message.TextMessage;
+        const query = message.text.split(' ').slice(1).join(' ');
+        
+        if (!query) {
+            await ctx.reply('⚠️ Please provide a search term. Example: /search nature');
+            return;
+        }
+
+        const loadingMsg = await ctx.reply(`🔍 Searching for "${query}" images...`);
+
+        const photos = await searchPhotos(query);
+
+        if (photos.length === 0) {
+            await ctx.reply('😕 No images found for your search.');
+            return;
+        }
+
+        // Delete the loading message
+        await ctx.telegram.deleteMessage(loadingMsg.chat.id, loadingMsg.message_id);
+
+        // Send each photo with attribution
+        for (const photo of photos) {
+            const caption = `📸 Photo by ${photo.user.name} (@${photo.user.username})
+            
+📝 ${photo.description || 'No description available'}
+
+🔗 View on Unsplash: ${photo.links.html}`;
+
+            await ctx.replyWithPhoto(
+                { url: photo.urls.regular },
+                { 
+                    caption,
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [[
+                            {
+                                text: '📷 View on Unsplash',
+                                url: photo.links.html
+                            }
+                        ]]
+                    }
+                }
+            );
+            
+            // Add a small delay between photos to prevent flooding
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
     } catch (error) {
-        console.error('Search error:', error);
-        return ctx.reply('Sorry, there was an error processing your search');
+        console.error('Search command error:', error);
+        await ctx.reply('❌ Sorry, there was an error processing your request.');
     }
 });
 
 // Add random image command handler
-bot.command('random', async (ctx: Context) => {
+bot.command('random', checkGroupMembership, async (ctx: Context) => {
     try {
-        await ctx.reply('🎲 Getting a random image...');
-        // Random image implementation will be added later
+        const loadingMsg = await ctx.reply('🎲 Getting a random image...');
+
+        const photo = await getRandomPhoto();
+
+        // Delete the loading message
+        await ctx.telegram.deleteMessage(loadingMsg.chat.id, loadingMsg.message_id);
+
+        const caption = `📸 Photo by ${photo.user.name} (@${photo.user.username})
+        
+📝 ${photo.description || 'No description available'}
+
+🔗 View on Unsplash: ${photo.links.html}`;
+
+        await ctx.replyWithPhoto(
+            { url: photo.urls.regular },
+            { 
+                caption,
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[
+                        {
+                            text: '📷 View on Unsplash',
+                            url: photo.links.html
+                        }
+                    ]]
+                }
+            }
+        );
     } catch (error) {
-        console.error('Random image error:', error);
-        await ctx.reply('Sorry, there was an error getting a random image');
+        console.error('Random command error:', error);
+        await ctx.reply('❌ Sorry, there was an error getting a random image.');
     }
 });
 

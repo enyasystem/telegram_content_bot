@@ -1,51 +1,64 @@
-import axios from 'axios';
-import { UnsplashImage } from '../types';
+import { createApi } from 'unsplash-js';
+import nodeFetch from 'node-fetch';
+import * as dotenv from 'dotenv';
+dotenv.config();
 
-const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY;
+interface UnsplashPhoto {
+    id: string;
+    urls: {
+        regular: string;
+        small: string;
+        raw: string;
+    };
+    description: string | null;
+    user: {
+        name: string;
+        username: string;
+        links: {
+            html: string;
+        };
+    };
+    links: {
+        html: string;
+    };
+}
 
-export const fetchImages = async (query: string, page: number = 1, perPage: number = 10) => {
+const unsplash = createApi({
+    accessKey: process.env.UNSPLASH_ACCESS_KEY!,
+    fetch: nodeFetch as unknown as typeof fetch,
+});
+
+export async function searchPhotos(query: string, page = 1): Promise<UnsplashPhoto[]> {
     try {
-        const response = await axios.get(`https://api.unsplash.com/search/photos`, {
-            params: {
-                query,
-                page,
-                per_page: perPage,
-                client_id: UNSPLASH_ACCESS_KEY,
-            },
+        const result = await unsplash.search.getPhotos({
+            query,
+            page,
+            perPage: 5,
+            orientation: 'landscape'
         });
-        return response.data.results;
-    } catch (error) {
-        console.error('Error fetching images from Unsplash:', error);
-        throw error;
-    }
-};
 
-export const fetchRandomImage = async () => {
-    try {
-        const response = await axios.get(`https://api.unsplash.com/photos/random`, {
-            params: {
-                client_id: UNSPLASH_ACCESS_KEY,
-            },
-        });
-        return response.data;
+        if (result.type === 'success') {
+            return result.response.results;
+        }
+        throw new Error('Failed to fetch photos');
     } catch (error) {
-        console.error('Error fetching random image from Unsplash:', error);
-        throw error;
+        console.error('🔍 Unsplash search error:', error);
+        throw new Error('Failed to search photos');
     }
-};
+}
 
-export const searchImages = async (query: string): Promise<UnsplashImage[]> => {
+export async function getRandomPhoto(): Promise<UnsplashPhoto> {
     try {
-        const response = await axios.get('https://api.unsplash.com/search/photos', {
-            params: {
-                query,
-                client_id: process.env.UNSPLASH_ACCESS_KEY,
-                per_page: 9
-            }
+        const result = await unsplash.photos.getRandom({
+            orientation: 'landscape'
         });
-        return response.data.results;
+
+        if (result.type === 'success') {
+            return result.response as UnsplashPhoto;
+        }
+        throw new Error('Failed to fetch random photo');
     } catch (error) {
-        console.error('Error fetching images:', error);
-        throw error;
+        console.error('🎲 Unsplash random photo error:', error);
+        throw new Error('Failed to get random photo');
     }
-};
+}
