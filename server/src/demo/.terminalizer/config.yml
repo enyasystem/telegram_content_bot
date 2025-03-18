@@ -1,0 +1,11 @@
+
+frames: 60
+frameDelay: 50
+maxIdleTime: 2000
+cols: 100
+rows: 30
+cursorStyle: block
+fontFamily: "Consolas, Monaco, 'Courier New', monospace"
+theme:
+  background: "#1a1b1d"
+  foreground: "#c5c8c6"

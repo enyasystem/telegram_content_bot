@@ -1,0 +1,82 @@
+# Terminalizer configuration
+config:
+  # Specify a command to be executed
+  command: 'ts-node botVisualDemo.ts'
+  
+  # Specify the current working directory
+  cwd: C:\Users\ELVIS\Desktop\telegram_content_bot\server\src\demo
+  
+  # Export additional ENV variables
+  env:
+    recording: "true"
+  
+  # Explicitly set the number of columns
+  cols: 100
+  
+  # Explicitly set the number of rows
+  rows: 30
+  
+  # The maximum time in milliseconds for waiting to automatic quit
+  maxIdleTime: 2000
+
+  # Frame box configuration
+  frameBox:
+    type: 'solid'
+    title: 'Telegram Bot Demo'
+    style:
+      fg: '#0088cc'
+      border: '#0088cc'
+
+# Recording settings
+recording:
+  # Maximum frame rate
+  frameDelay: 50
+  # Maximum delay between frames in ms
+  maxDelay: 1000
+  # Frame format
+  frameBox:
+    style:
+      boxed: true
+      color: "cyan"
+
+# GIF settings
+gif:
+  # Quality
+  quality: 100
+  # Repeat count
+  repeat: 0
+
+# Terminalizer configuration file
+frames: 60
+frameDelay: 50
+maxIdleTime: 2000
+cols: 100
+rows: 30
+cursorStyle: block
+fontFamily: "Consolas, Monaco, 'Courier New', monospace"
+theme:
+  background: "#1a1b1d"
+  foreground: "#c5c8c6"
+  cursor: "#c5c8c6"
+  black: "#1a1b1d"
+  red: "#cc6666"
+  green: "#b5bd68"
+  yellow: "#f0c674"
+  blue: "#81a2be"
+  magenta: "#b294bb"
+  cyan: "#8abeb7"
+  white: "#c5c8c6"
+watermark:
+  imagePath: null
+  style:
+    position: absolute
+    right: 15px
+    bottom: 15px
+    width: 100px
+    opacity: 0.9
+commands:
+  - ts-node botVisualDemo.ts
+records:
+  - command: "demo"
+    content: "ts-node botVisualDemo.ts"
+    cwd: "C:\\Users\\ELVIS\\Desktop\\telegram_content_bot\\server\\src\\demo"
