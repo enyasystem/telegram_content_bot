@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "commonjs",
-    "lib": ["es2017", "esnext.asynciterable"],
+    "lib": ["ES2020", "DOM"],
     "skipLibCheck": true,
     "sourceMap": true,
     "outDir": "./dist",
@@ -29,7 +29,7 @@
       "@/*": ["src/*"]
     },
     "types": ["node"],
-    "typeRoots": ["./node_modules/@types"]
+    "typeRoots": ["./node_modules/@types", "./src/types"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]

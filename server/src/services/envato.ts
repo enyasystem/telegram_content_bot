@@ -1,6 +1,5 @@
 import nodeFetch from 'node-fetch';
-import * as dotenv from 'dotenv';
-dotenv.config();
+import env from '../config/env';
 
 interface EnvatoItem {
     id: number;
@@ -13,17 +12,82 @@ interface EnvatoItem {
     preview_url: string;
 }
 
+interface EnvatoAuth {
+    email: string;
+    password: string;
+    sessionToken?: string;
+}
+
 const ENVATO_API_URL = 'https://api.envato.com/v1/market';
+const ENVATO_AUTH_URL = 'https://account.envato.com/sign_in';
 
 class EnvatoService {
-    private token: string;
-
+    private auth: EnvatoAuth;
+    
     constructor() {
-        const token = process.env.ENVATO_PERSONAL_TOKEN;
-        if (!token) {
-            throw new Error('ENVATO_PERSONAL_TOKEN not configured');
+        this.auth = {
+            email: env.ENVATO_EMAIL,
+            password: env.ENVATO_PASSWORD
+        };
+    }
+
+    private async authenticate(): Promise<void> {
+        if (!this.auth?.email || !this.auth?.password) {
+            throw new Error('Envato credentials not configured');
         }
-        this.token = token;
+
+        try {
+            const response = await nodeFetch(ENVATO_AUTH_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'TelegramBot/1.0'
+                },
+                body: JSON.stringify({
+                    username: this.auth.email,
+                    password: this.auth.password
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Authentication failed');
+            }
+
+            const data = await response.json();
+            this.auth.sessionToken = data.token;
+        } catch (error) {
+            console.error('❌ Envato authentication error:', error);
+            throw error;
+        }
+    }
+
+    async downloadItem(itemId: number): Promise<Buffer> {
+        try {
+            if (!this.auth?.sessionToken) {
+                await this.authenticate();
+            }
+
+            console.log(`📥 Downloading item ${itemId}`);
+            
+            const response = await nodeFetch(
+                `${ENVATO_API_URL}/download/item/${itemId}`,
+                {
+                    headers: {
+                        'User-Agent': 'TelegramBot/1.0',
+                        'Authorization': `Bearer ${this.auth?.sessionToken}`
+                    }
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`Download failed: ${response.statusText}`);
+            }
+
+            return await response.buffer();
+        } catch (error) {
+            console.error('❌ Download error:', error);
+            throw error;
+        }
     }
 
     async searchItems(query: string): Promise<EnvatoItem[]> {
@@ -34,7 +98,6 @@ class EnvatoService {
                 `${ENVATO_API_URL}/search/item?term=${encodeURIComponent(query)}`,
                 {
                     headers: {
-                        'Authorization': `Bearer ${this.token}`,
                         'User-Agent': 'TelegramBot/1.0'
                     }
                 }
@@ -79,7 +142,6 @@ class EnvatoService {
                 `${ENVATO_API_URL}/popular:themeforest`,
                 {
                     headers: {
-                        'Authorization': `Bearer ${this.token}`,
                         'User-Agent': 'TelegramBot/1.0'
                     }
                 }

@@ -4,21 +4,27 @@
   "description": "A Telegram bot that fetches content from the Unsplash API and provides a user-friendly interface.",
   "main": "server/src/app.ts",
   "scripts": {
-    "start": "node server/src/app.js",
+    "start": "node dist/app.js",
     "client": "npm start --prefix client",
     "server": "nodemon server/src/app.ts",
-    "dev": "concurrently \"npm run server\" \"npm run client\""
+    "dev": "ts-node-dev --respawn --transpile-only src/app.ts",
+    "build": "tsc"
   },
   "dependencies": {
-    "express": "^4.17.1",
     "axios": "^0.21.1",
     "dotenv": "^8.2.0",
-    "node-fetch": "^2.6.1",
-    "telegraf": "^3.38.0"
+    "express": "^4.17.1",
+    "node-fetch": "^2.7.0",
+    "puppeteer": "^24.4.0",
+    "telegraf": "^4.16.3"
   },
   "devDependencies": {
-    "nodemon": "^2.0.7",
+    "@types/node": "^22.13.10",
+    "@types/node-fetch": "^2.6.12",
+    "@types/puppeteer": "^5.4.7",
     "concurrently": "^5.3.0",
+    "node-html-parser": "^7.0.1",
+    "nodemon": "^2.0.7",
     "typescript": "^4.1.2"
   },
   "author": "Your Name",

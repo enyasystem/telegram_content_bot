@@ -1,30 +1,49 @@
-import { config } from 'dotenv';
-import path from 'path';
+import { cleanEnv, str, port } from 'envalid';
+import * as dotenv from 'dotenv';
 
-const envPath = path.resolve(process.cwd(), '../.env');
-const result = config({ path: envPath });
+dotenv.config();
 
-if (result.error) {
-    throw new Error(`Failed to load .env file from ${envPath}`);
-}
+const env = cleanEnv(process.env, {
+    // Server Configuration
+    PORT: port({ default: 5000 }),
 
-// Validate environment variables
-const required = [
-    'TELEGRAM_BOT_TOKEN',
-    'UNSPLASH_ACCESS_KEY',
-    'JWT_SECRET'
-] as const;
+    // Bot Configuration
+    TELEGRAM_BOT_TOKEN: str({
+        desc: 'Telegram Bot Token from BotFather'
+    }),
+    TELEGRAM_GROUP_ID: str({
+        desc: 'Telegram Group ID'
+    }),
 
-for (const key of required) {
-    if (!process.env[key]) {
-        throw new Error(`Missing required environment variable: ${key}`);
-    }
-}
+    // Freepik Account
+    FREEPIK_USERNAME: str({
+        desc: 'Freepik account username/email'
+    }),
+    FREEPIK_PASSWORD: str({
+        desc: 'Freepik account password'
+    }),
 
-export default {
-    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN!,
-    UNSPLASH_ACCESS_KEY: process.env.UNSPLASH_ACCESS_KEY!,
-    JWT_SECRET: process.env.JWT_SECRET!,
-    PORT: parseInt(process.env.PORT || '5000', 10),
-    NODE_ENV: process.env.NODE_ENV || 'development'
-};
+    // Envato Account
+    ENVATO_EMAIL: str({
+        desc: 'Envato account email'
+    }),
+    ENVATO_PASSWORD: str({
+        desc: 'Envato account password'
+    }),
+
+    // Puppeteer Configuration
+    CHROME_PATH: str({
+        default: process.env.CHROME_PATH || '',
+        desc: 'Path to Chrome executable'
+    }),
+    PUPPETEER_TIMEOUT: str({
+        default: process.env.PUPPETEER_TIMEOUT || '120000',
+        desc: 'Puppeteer timeout in milliseconds'
+    }),
+    PUPPETEER_ARGS: str({
+        default: process.env.PUPPETEER_ARGS || '--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage',
+        desc: 'Puppeteer arguments'
+    })
+});
+
+export default env;

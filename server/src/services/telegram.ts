@@ -1,19 +1,23 @@
 import { Telegraf, Context } from 'telegraf';
-import { Message } from 'telegraf/types';
+import { Update, Message, Chat } from 'telegraf/types';
 import * as dotenv from 'dotenv';
 import path from 'path';
 import { checkGroupMembership } from '../middleware/authMiddleware';
-import { searchPhotos, getRandomPhoto } from './unsplash';
-import { envatoService } from './envato';
+import { envatoService, resourceService, FreepikService } from './';
+const freepikService = new FreepikService();
+import { downloader } from './downloader';
+import fs from 'fs';
+import env from '../config/env';
 
 // Configure dotenv to look for .env in the project root
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // Debug logging
-console.log('Environment variables loaded:', {
-    hasToken: !!process.env.TELEGRAM_BOT_TOKEN,
-    tokenPrefix: process.env.TELEGRAM_BOT_TOKEN?.substring(0, 5)
-});
+console.log('🔍 Checking environment variables...');
+console.log('✅ Bot token:', env.TELEGRAM_BOT_TOKEN ? 'Present' : 'Missing');
+console.log('✅ Group ID:', env.TELEGRAM_GROUP_ID ? 'Present' : 'Missing');
+console.log('✅ Freepik credentials:', env.FREEPIK_USERNAME ? 'Present' : 'Missing');
+console.log('✅ Envato credentials:', env.ENVATO_EMAIL ? 'Present' : 'Missing');
 
 const validateBotToken = (token: string): boolean => {
     // Remove 'bot' prefix if present
@@ -37,18 +41,45 @@ const validateBotToken = (token: string): boolean => {
     return true;
 };
 
-const botToken = process.env.TELEGRAM_BOT_TOKEN;
+const botToken = env.TELEGRAM_BOT_TOKEN;
 if (!botToken || !validateBotToken(botToken)) {
     throw new Error('Invalid TELEGRAM_BOT_TOKEN format. Please get a valid token from @BotFather');
 }
 
-const bot = new Telegraf(botToken);
+// Define custom context type
+interface BotContext extends Context<Update> {
+    message: Update.New & Update.NonChannel & Message.TextMessage & {
+        chat: Exclude<Chat, Chat.ChannelChat>;
+    };
+}
+
+// Initialize bot with custom context
+const bot = new Telegraf<BotContext>(botToken);
+
+// Register commands
+const registerCommands = async () => {
+    try {
+        await bot.telegram.setMyCommands([
+            { command: 'start', description: 'Start the bot' },
+            { command: 'help', description: 'Show help message' },
+            { command: 'random', description: 'Get random resources' },
+            { command: 'random_freepik', description: 'Get random Freepik resources' },
+            { command: 'random_envato', description: 'Get random Envato resources' },
+            { command: 'search', description: 'Search resources (usage: /search freepik nature)' },
+            { command: 'trending', description: 'Show trending resources' },
+            { command: 'categories', description: 'Browse resource categories' }
+        ]);
+        console.log('✅ Bot commands registered successfully');
+    } catch (error) {
+        console.error('❌ Failed to register bot commands:', error);
+    }
+};
 
 // Add middleware to bot
 bot.use(checkGroupMembership);
 
 // Add command type for better organization
-type SearchSource = 'unsplash' | 'envato' | 'both';
+type SearchSource = 'freepik' | 'envato' | 'both';
 
 // Add keyboard markup helper
 const getMainKeyboard = () => {
@@ -56,7 +87,7 @@ const getMainKeyboard = () => {
         reply_markup: {
             keyboard: [
                 [{ text: '🔍 Search' }, { text: '🎲 Random' }],
-                [{ text: '📷 Photos' }, { text: '🛒 Market' }],
+                [{ text: '🎨 Freepik' }, { text: '🛒 Market' }],
                 [{ text: '❓ Help' }]
             ],
             resize_keyboard: true
@@ -72,19 +103,22 @@ const helpText = `*Available Commands* 📚
 /help - Show this help message
 
 🔍 *Search Commands*
-/search <query> - Search both Unsplash & Envato
-/photos <query> - Search Unsplash photos only
+/search <query> - Search both Freepik & Envato
+/freepik <query> - Search Freepik resources only
 /market <query> - Search Envato marketplace only
 
 🎲 *Random Content*
 /random - Get random items from both sources
-/randomphoto - Get random photo from Unsplash
+/randomfreepik - Get random resources from Freepik
 /randommarket - Get random items from Envato
 
-Example: Try "/photos nature" or "/market icons"`;
+📥 *Download Command*
+/download <url> - Download content from Freepik or Envato
+
+Example: Try "/freepik nature" or "/market icons"`;
 
 // Bot commands setup
-bot.command('start', async (ctx: Context) => {
+bot.command('start', async (ctx) => {
     try {
         await ctx.reply(
             'Welcome to the content bot! 🎉\nUse the buttons below or /help to see available commands.',
@@ -103,11 +137,32 @@ bot.command('help', async (ctx: Context) => {
 
 // Update search command to handle both APIs
 bot.command('search', checkGroupMembership, async (ctx: Context) => {
-    await handleSearch(ctx, 'both');
+    if (!ctx.message || !('text' in ctx.message)) {
+        await ctx.reply('⚠️ Please provide a search term');
+        return;
+    }
+
+    const args = ctx.message.text.split(' ');
+    if (args.length < 3) {
+        await ctx.reply('Usage: /search <freepik|envato> <query>\nExample: /search freepik nature');
+        return;
+    }
+
+    const [_, type, ...queryParts] = args;
+    const query = queryParts.join(' ');
+    
+    try {
+        const results = await resourceService.search(query, type as 'freepik' | 'envato');
+        // Handle results...
+        await ctx.reply(`Found ${results.total} results from ${results.type}`);
+    } catch (error) {
+        console.error('Search error:', error);
+        await ctx.reply('❌ An error occurred while searching');
+    }
 });
 
-bot.command('photos', checkGroupMembership, async (ctx: Context) => {
-    await handleSearch(ctx, 'unsplash');
+bot.command('freepik', checkGroupMembership, async (ctx: Context) => {
+    await handleSearch(ctx, 'freepik');
 });
 
 bot.command('market', checkGroupMembership, async (ctx: Context) => {
@@ -115,7 +170,11 @@ bot.command('market', checkGroupMembership, async (ctx: Context) => {
 });
 
 // Add handlers for unknown commands and messages
-bot.on('text', async (ctx) => {
+bot.on('text', async (ctx: Context) => {
+    if (!ctx.message || !('text' in ctx.message)) {
+        return;
+    }
+
     const text = ctx.message.text;
     
     if (text.startsWith('/')) {
@@ -134,7 +193,7 @@ bot.on('text', async (ctx) => {
         const messageMap: { [key: string]: string } = {
             '🔍 Search': '/search',
             '🎲 Random': '/random',
-            '📷 Photos': '/photos',
+            '🎨 Freepik': '/freepik',
             '🛒 Market': '/market',
             '❓ Help': '/help'
         };
@@ -145,8 +204,8 @@ bot.on('text', async (ctx) => {
                 case '🔍 Search':
                     await ctx.reply('To search both platforms:\n/search <query>\nExample: /search nature');
                     break;
-                case '📷 Photos':
-                    await ctx.reply('To search Unsplash photos:\n/photos <query>\nExample: /photos landscape');
+                case '🎨 Freepik':
+                    await ctx.reply('To search Freepik resources:\n/freepik <query>\nExample: /freepik landscape');
                     break;
                 case '🛒 Market':
                     await ctx.reply('To search Envato items:\n/market <query>\nExample: /market icons');
@@ -172,8 +231,12 @@ bot.on('text', async (ctx) => {
 // Helper function to handle searches
 async function handleSearch(ctx: Context, source: SearchSource) {
     try {
-        const message = ctx.message as Message.TextMessage;
-        const query = message.text.split(' ').slice(1).join(' ');
+        if (!ctx.message || !('text' in ctx.message)) {
+            await ctx.reply('⚠️ Please provide a search term');
+            return;
+        }
+
+        const query = ctx.message.text.split(' ').slice(1).join(' ');
         
         if (!query) {
             await ctx.reply('⚠️ Please provide a search term. Example: /search nature');
@@ -184,15 +247,15 @@ async function handleSearch(ctx: Context, source: SearchSource) {
 
         let results: any[] = [];
 
-        if (source === 'both' || source === 'unsplash') {
+        if (source === 'both' || source === 'freepik') {
             try {
-                const unsplashResults = await searchPhotos(query);
-                results.push(...unsplashResults.map(photo => ({
-                    type: 'unsplash',
-                    data: photo
+                const freepikResults = await freepikService.search(query);
+                results.push(...freepikResults.map((item: any) => ({
+                    type: 'freepik',
+                    data: item
                 })));
             } catch (error) {
-                console.error('Unsplash search error:', error);
+                console.error('Freepik search error:', error);
             }
         }
 
@@ -216,31 +279,31 @@ async function handleSearch(ctx: Context, source: SearchSource) {
             return;
         }
 
-        // Shuffle results if showing both sources
-        if (source === 'both') {
-            results = results.sort(() => Math.random() - 0.5);
-        }
-
         // Send results
-        for (const result of results) {
-            if (result.type === 'unsplash') {
-                const photo = result.data;
-                const caption = `📸 *Photo by ${photo.user.name}*
+        for (const result of results.slice(0, 5)) {
+            if (result.type === 'freepik') {
+                const item = result.data;
+                const caption = `🎨 *${item.title}*
                 
-📝 ${photo.description || 'No description available'}
+By: ${item.author.name}
+📁 Type: ${item.type}
 
-🔗 [View on Unsplash](${photo.links.html})`;
+${item.description ? `📝 ${item.description.substring(0, 100)}...` : ''}`;
 
                 await ctx.replyWithPhoto(
-                    { url: photo.urls.regular },
+                    { url: item.preview_url },
                     { 
                         caption,
                         parse_mode: 'Markdown',
                         reply_markup: {
                             inline_keyboard: [[
                                 {
-                                    text: '📷 View on Unsplash',
-                                    url: photo.links.html
+                                    text: '🎨 View on Freepik',
+                                    url: item.url
+                                },
+                                {
+                                    text: '📥 Download',
+                                    callback_data: `download_freepik:${item.id}`
                                 }
                             ]]
                         }
@@ -266,6 +329,10 @@ ${item.description ? `📝 ${item.description.substring(0, 100)}...` : ''}`;
                                 {
                                     text: '🛒 View on Envato',
                                     url: item.url
+                                },
+                                {
+                                    text: '📥 Download',
+                                    callback_data: `download_envato:${item.id}`
                                 }
                             ]]
                         }
@@ -282,69 +349,25 @@ ${item.description ? `📝 ${item.description.substring(0, 100)}...` : ''}`;
     }
 }
 
-// Add random photo command handler
-bot.command('randomphoto', checkGroupMembership, async (ctx: Context) => {
-    try {
-        const loadingMsg = await ctx.reply('🎲 Getting a random photo...');
-        
-        const photo = await getRandomPhoto();
-        
-        await ctx.telegram.deleteMessage(loadingMsg.chat.id, loadingMsg.message_id);
-
-        const caption = `📸 *Photo by ${photo.user.name}*
-        
-📝 ${photo.description || 'No description available'}
-
-🔗 [View on Unsplash](${photo.links.html})`;
-
-        await ctx.replyWithPhoto(
-            { url: photo.urls.regular },
-            { 
-                caption,
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: [[
-                        {
-                            text: '📷 View on Unsplash',
-                            url: photo.links.html
-                        }
-                    ]]
-                }
-            }
-        );
-    } catch (error) {
-        console.error('Random photo error:', error);
-        await ctx.reply('❌ Sorry, there was an error getting a random photo.');
-    }
-});
-
-// Update random command to handle both sources
+// Update the random command to only use Freepik and Envato
 bot.command('random', async (ctx: Context) => {
     try {
         const loadingMsg = await ctx.reply('🎲 Getting random content...');
-        
         let results: any[] = [];
 
-        // Get random photo from Unsplash
+        // Get random items from both services
         try {
-            const randomPhoto = await getRandomPhoto();
-            results.push({
-                type: 'unsplash',
-                data: randomPhoto
-            });
-        } catch (error) {
-            console.error('Random Unsplash error:', error);
-        }
+            const [freepikResults, envatoResults] = await Promise.all([
+                freepikService.getRandomItems(),
+                envatoService.getRandomItems()
+            ]);
 
-        // Get random items from Envato
-        try {
-            const randomItems = await envatoService.getRandomItems();
-            results.push(...randomItems.slice(0, 2).map(item => ({
-                type: 'envato',
-                data: item
-            })));
+            results = [
+                ...freepikResults.slice(0, 2).map((item: any) => ({ type: 'freepik', data: item })),
+                ...envatoResults.slice(0, 2).map((item: any) => ({ type: 'envato', data: item }))
+            ].sort(() => Math.random() - 0.5);
         } catch (error) {
-            console.error('Random Envato error:', error);
+            console.error('Random content error:', error);
         }
 
         await ctx.telegram.deleteMessage(loadingMsg.chat.id, loadingMsg.message_id);
@@ -354,61 +377,9 @@ bot.command('random', async (ctx: Context) => {
             return;
         }
 
-        // Shuffle results
-        results = results.sort(() => Math.random() - 0.5);
-
-        // Send results
+        // Send results with delay between messages
         for (const result of results) {
-            if (result.type === 'unsplash') {
-                const photo = result.data;
-                const caption = `📸 *Random Photo by ${photo.user.name}*
-                
-📝 ${photo.description || 'No description available'}
-
-🔗 [View on Unsplash](${photo.links.html})`;
-
-                await ctx.replyWithPhoto(
-                    { url: photo.urls.regular },
-                    { 
-                        caption,
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            inline_keyboard: [[
-                                {
-                                    text: '📷 View on Unsplash',
-                                    url: photo.links.html
-                                }
-                            ]]
-                        }
-                    }
-                );
-            } else {
-                const item = result.data;
-                const caption = `🔥 *Random from Envato*
-
-📸 *${item.name}*
-By: ${item.author_username}
-💰 Price: $${(item.price_cents / 100).toFixed(2)}
-📁 Category: ${item.category}`;
-
-                await ctx.replyWithPhoto(
-                    { url: item.preview_url },
-                    { 
-                        caption,
-                        parse_mode: 'Markdown',
-                        reply_markup: {
-                            inline_keyboard: [[
-                                {
-                                    text: '🛒 View on Envato',
-                                    url: item.url
-                                }
-                            ]]
-                        }
-                    }
-                );
-            }
-            
-            // Add delay between messages
+            await sendResourceMessage(ctx, result);
             await new Promise(resolve => setTimeout(resolve, 500));
         }
     } catch (error) {
@@ -416,6 +387,43 @@ By: ${item.author_username}
         await ctx.reply('❌ Sorry, there was an error getting random content.');
     }
 });
+
+// Helper function to send resource messages
+async function sendResourceMessage(ctx: Context, result: any) {
+    const { type, data: item } = result;
+    
+    if (type === 'freepik') {
+        const caption = `🎨 *Random from Freepik*\n\n*${item.title}*\nBy: ${item.author.name}\n📁 Type: ${item.type}`;
+        await ctx.replyWithPhoto(
+            { url: item.preview_url },
+            { 
+                caption,
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '🎨 View on Freepik', url: item.url },
+                        { text: '📥 Download', callback_data: `download_freepik:${item.id}` }
+                    ]]
+                }
+            }
+        );
+    } else {
+        const caption = `🛒 *Random from Envato*\n\n*${item.name}*\nBy: ${item.author_username}\n💰 Price: $${(item.price_cents / 100).toFixed(2)}\n📁 Category: ${item.category}`;
+        await ctx.replyWithPhoto(
+            { url: item.preview_url },
+            { 
+                caption,
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '🛒 View on Envato', url: item.url },
+                        { text: '📥 Download', callback_data: `download_envato:${item.id}` }
+                    ]]
+                }
+            }
+        );
+    }
+}
 
 // Add random image command handler
 bot.command('randommarket', async (ctx: Context) => {
@@ -458,29 +466,78 @@ By: ${item.author_username}
     }
 });
 
-// Error handling
-bot.catch((err: any) => {
-    console.error('Telegraf error:', err);
+bot.command('download', async (ctx: Context) => {
+    // Type guard for text messages
+    if (!ctx.message || !('text' in ctx.message)) {
+        await ctx.reply('Please send a text message');
+        return;
+    }
+
+    const message = ctx.message;
+    const url = message.text.split(' ')[1];
+    
+    if (!url) {
+        await ctx.reply('Please provide a URL to download');
+        return;
+    }
+
+    const loadingMsg = await ctx.reply('⏳ Downloading content...');
+
+    try {
+        let result;
+        if (url.includes('freepik.com')) {
+            result = await downloader.downloadFromFreepik(url);
+        } else if (url.includes('envato.com')) {
+            result = await downloader.downloadFromEnvato(url);
+        } else {
+            await ctx.reply('❌ Unsupported URL. Please use Freepik or Envato links.');
+            return;
+        }
+
+        if (result.success && result.filePath) {
+            await ctx.replyWithDocument({
+                source: fs.createReadStream(result.filePath),
+                filename: 'content.zip'
+            });
+            await ctx.reply('✅ Download complete!');
+        } else {
+            await ctx.reply('❌ Download failed: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        await ctx.reply('❌ An error occurred during download');
+    } finally {
+        await ctx.telegram.deleteMessage(loadingMsg.chat.id, loadingMsg.message_id);
+    }
 });
 
+// Update error handler with correct type signature
+bot.catch((err: unknown, ctx: BotContext) => {
+    console.error('Bot Error:', err);
+    
+    // Notify user of error if possible
+    if (ctx) {
+        ctx.reply('❌ An error occurred while processing your request.')
+            .catch(console.error);
+    }
+});
+
+// Keep the startBot function and graceful shutdown handlers
 export const startBot = async () => {
     try {
-        // Verify bot token before launching
-        const me = await bot.telegram.getMe();
-        console.log('Bot initialized:', {
-            username: me.username,
-            id: me.id,
-            isBot: me.is_bot,
-            commands: ['/start', '/help', '/search', '/random']
-        });
-        
+        console.log('🤖 Starting bot...');
+        await registerCommands();
         await bot.launch();
-        console.log('🤖 Telegram bot started successfully');
-    } catch (error: any) {
-        console.error('❌ Bot initialization error:', error.message);
-        if (error.response?.error_code === 404) {
-            throw new Error('Invalid bot token. Please create a new bot with @BotFather');
-        }
+        console.log('✅ Bot successfully started!');
+        
+        // Test the bot's connection
+        const botInfo = await bot.telegram.getMe();
+        console.log('🤖 Bot Info:', {
+            username: botInfo.username,
+            id: botInfo.id,
+            isBot: botInfo.is_bot
+        });
+    } catch (error) {
+        console.error('❌ Failed to start bot:', error);
         throw error;
     }
 };
@@ -490,3 +547,164 @@ process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
 export { bot };
+
+// Register bot commands with Telegram
+bot.telegram.setMyCommands([
+    { command: 'start', description: 'Start the bot' },
+    { command: 'help', description: 'Show help message' },
+    { command: 'random', description: 'Get random resources' },
+    { command: 'random_freepik', description: 'Get random Freepik resources' },
+    { command: 'random_envato', description: 'Get random Envato resources' },
+    { command: 'search', description: 'Search resources (usage: /search freepik nature)' },
+    { command: 'trending', description: 'Show trending resources' },
+    { command: 'categories', description: 'Browse resource categories' }
+]);
+
+// Help command
+bot.command('help', async (ctx) => {
+    const helpMessage = `
+🎨 *Available Commands*:
+
+/start - Start the bot
+/help - Show this help message
+/random - Get random resources from all sources
+/random_freepik - Get random Freepik resources
+/random_envato - Get random Envato resources
+/search <source> <query> - Search resources
+/trending - Show trending resources
+/categories - Browse resource categories
+
+*Examples*:
+• /search freepik nature
+• /search envato business template
+• /random_freepik
+• /trending
+
+*Tips*:
+• Use specific keywords for better results
+• Check /trending for popular content
+• Browse /categories for organized content
+    `;
+
+    await ctx.reply(helpMessage, { parse_mode: 'Markdown' });
+});
+
+// Random command handler
+bot.command(['random', 'random_freepik', 'random_envato'], async (ctx) => {
+    try {
+        const command = ctx.message.text.split('/')[1];
+        const type = command === 'random_freepik' ? 'freepik' : 
+                    command === 'random_envato' ? 'envato' : 
+                    Math.random() < 0.5 ? 'freepik' : 'envato';
+
+        const loadingMsg = await ctx.reply('🎲 Getting random content...');
+        
+        const results = await resourceService.getRandomItems(type);
+        await ctx.telegram.deleteMessage(loadingMsg.chat.id, loadingMsg.message_id);
+
+        if (!results.data.length) {
+            await ctx.reply('😕 No random content available at the moment.');
+            return;
+        }
+
+        // Send results with delay between messages
+        for (const item of results.data.slice(0, 5)) {
+            if ('title' in item) {
+                // Freepik item
+                const caption = `🎨 *Random from Freepik*\n\n*${item.title}*\nBy: ${item.author.name}\n📁 Type: ${item.type}`;
+                await ctx.replyWithPhoto({ url: item.preview_url }, {
+                    caption,
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: '🎨 View on Freepik', url: item.url },
+                            { text: '📥 Download', callback_data: `download_freepik:${item.id}` }
+                        ]]
+                    }
+                });
+            } else {
+                // Envato item
+                const caption = `🛒 *Random from Envato*\n\n*${item.name}*\nBy: ${item.author_username}\n💰 Price: $${(item.price_cents / 100).toFixed(2)}`;
+                await ctx.replyWithPhoto({ url: item.preview_url }, {
+                    caption,
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: '🛒 View on Envato', url: item.url },
+                            { text: '📥 Download', callback_data: `download_envato:${item.id}` }
+                        ]]
+                    }
+                });
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    } catch (error) {
+        console.error('Random command error:', error);
+        await ctx.reply('❌ Sorry, there was an error getting random content.');
+    }
+});
+
+// Add trending command
+bot.command('trending', async (ctx) => {
+    try {
+        const loadingMsg = await ctx.reply('📈 Getting trending content...');
+        const [freepikTrending, envatoTrending] = await Promise.all([
+            resourceService.search('trending', 'freepik'),
+            resourceService.search('trending', 'envato')
+        ]);
+
+        await ctx.telegram.deleteMessage(loadingMsg.chat.id, loadingMsg.message_id);
+        
+        const trendingMessage = `
+📈 *Trending Content*
+
+🎨 *Freepik Trending*:
+${freepikTrending.data.slice(0, 3).map((item: any) => `• ${item.title}`).join('\n')}
+
+🛒 *Envato Trending*:
+${envatoTrending.data.slice(0, 3).map((item: any) => `• ${item.name}`).join('\n')}
+
+Use /random to discover more content!
+        `;
+
+        await ctx.reply(trendingMessage, { parse_mode: 'Markdown' });
+    } catch (error) {
+        console.error('Trending command error:', error);
+        await ctx.reply('❌ Sorry, there was an error getting trending content.');
+    }
+});
+
+// Add categories command
+bot.command('categories', async (ctx) => {
+    await ctx.reply('Browse Categories:', {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: '🖼 Vectors', callback_data: 'category_vectors' },
+                    { text: '📸 Photos', callback_data: 'category_photos' }
+                ],
+                [
+                    { text: '🎨 Templates', callback_data: 'category_templates' },
+                    { text: '📱 Social Media', callback_data: 'category_social' }
+                ],
+                [
+                    { text: '💼 Business', callback_data: 'category_business' },
+                    { text: '🎉 Events', callback_data: 'category_events' }
+                ]
+            ]
+        }
+    });
+});
+
+// Handle category selection
+bot.action(/category_(.+)/, async (ctx) => {
+    const category = ctx.match[1];
+    try {
+        await ctx.reply(`🔍 Searching ${category}...`);
+        await resourceService.search(category, 'freepik');
+        // ... handle results similar to random command
+    } catch (error) {
+        console.error('Category search error:', error);
+        await ctx.reply('❌ Sorry, there was an error searching the category.');
+    }
+});
